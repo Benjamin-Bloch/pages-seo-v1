@@ -1,0 +1,33 @@
+# Secrets — never commit a filled-in env.
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# wrangler.toml IS checked in — it ships with placeholder D1/R2 IDs
+# so the Cloudflare "Deploy to Cloudflare" button works out of the
+# box (it detects all-zero UUIDs and prompts to create real
+# resources on the user's account).
+#
+# Maintainers + CLI installers keep their real IDs in
+# wrangler.live.toml (gitignored). The CLI installer (setup.sh)
+# writes the live overlay there after provisioning.
+wrangler.live.toml
+
+# Setup script state machine. Generated locally; delete to start over.
+.setup-state
+
+# Local-only reference scratch files (e.g. soro-example.js used while
+# building the embed widget; not part of the project).
+soro-example.js
+
+# Tool caches.
+node_modules/
+.wrangler/
+__pycache__/
+
+# Editor / OS noise.
+.DS_Store
+*.log
+.idea/
+.vscode/

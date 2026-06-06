@@ -1,0 +1,85 @@
+name: 🐛 Bug report
+description: Something is broken or behaving unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more specific you can be, the faster it gets fixed.
+  - type: textarea
+    id: what
+    attributes:
+      label: What's happening
+      description: A clear description of the behaviour you're seeing.
+      placeholder: When I click X, the dashboard shows Y instead of Z.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to /admin
+        2. Click …
+        3. See the error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit SHA or version
+      description: From the footer of /admin, or `git rev-parse HEAD`.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider in use
+      options:
+        - Workers AI (default)
+        - OpenAI
+        - Anthropic
+        - Gemini
+        - Groq
+        - DeepSeek
+        - Mistral
+        - Together
+        - Cerebras
+        - Other / multiple
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 🖼️ Screenshots
+      description: |
+        Paste any screenshots that help reproduce or visualise the bug.
+        On macOS: ⌘⇧4 captures a region; ⌘⇧5 lets you record a clip.
+        On Windows: Win+Shift+S. On Linux: most desktops have a Screenshot tool.
+        Drag the image into this textarea and GitHub uploads it inline.
+        If the bug is visual (layout broken, the wrong colour, etc.) screenshots are usually faster than describing it.
+      placeholder: |
+        (Drag a screenshot here, or paste from clipboard.)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: |
+        Wrangler tail output, browser console, or D1 query results.
+        **Redact** any API tokens, passwords, or admin tokens before pasting.
+      render: shell
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & OS
+      description: e.g. "Chrome 137 on macOS 26", "Safari iOS 19", "Firefox 142 on Ubuntu".
+  - type: checkboxes
+    id: checked-docs
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I checked [/docs](https://seo.benjaminb.xyz/docs) for a known fix
+        - label: I checked existing issues for a duplicate
+        - label: My logs don't include any tokens or passwords

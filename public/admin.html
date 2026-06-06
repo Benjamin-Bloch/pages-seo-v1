@@ -1,0 +1,1145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Admin · pages-seo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap" />
+<link rel="stylesheet" href="/admin.css" />
+<link rel="stylesheet" href="/cover-editor.css" />
+<script>
+  // Apply persisted theme before first paint so the admin doesn't
+  // flash dark-then-light on reload. Default is dark (no attr).
+  (function () {
+    try {
+      var t = localStorage.getItem('ps_admin_theme');
+      if (t === 'light') document.documentElement.dataset.theme = 'light';
+    } catch (e) { /* private mode / disabled storage */ }
+  })();
+</script>
+</head>
+<body>
+
+<!-- Login gate. Shown on first load; admin.js validates the session
+     via /api/admin/whoami before swapping to the main dashboard.
+     POSTs to /api/admin/login which sets an HttpOnly cookie. -->
+<div id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <h1>pages-seo admin</h1>
+    <p>Sign in to manage your blog and programmatic SEO pipeline.</p>
+    <form id="login-form" method="post" action="#" autocomplete="on">
+      <label class="gate-field">
+        <span>Email</span>
+        <input id="gate-email" type="email" autocomplete="username" required placeholder="you@example.com" />
+      </label>
+      <label class="gate-field">
+        <span>Password</span>
+        <input id="gate-password" type="password" autocomplete="current-password" required placeholder="" />
+      </label>
+      <button id="gate-go" type="submit" class="btn btn-primary">Sign in</button>
+    </form>
+    <div id="gate-err" class="err"></div>
+  </div>
+</div>
+
+<!-- First-run setup card. Shown on a fresh one-click deploy when
+     /api/admin/whoami returns { needs_setup: true }. Collects the
+     site identity + admin credentials and POSTs to /api/setup which
+     applies the schema, generates ADMIN_TOKEN + INDEXNOW_KEY, and
+     seeds the first user. -->
+<div id="setup" class="wiz" hidden>
+  <div class="wiz-shell">
+    <header class="wiz-head">
+      <div class="wiz-brand-mark">
+        <span class="wiz-dot"></span>
+        <span class="wiz-brand-text">pages-seo</span>
+      </div>
+      <ol class="wiz-steps" aria-label="Setup progress">
+        <li class="wiz-step is-current"><b>Account</b></li>
+      </ol>
+      <span></span>
+    </header>
+
+    <section class="wiz-pane wiz-pane-center" hidden id="setup-success">
+      <div class="wiz-tick wiz-tick-big">✓</div>
+      <h1 class="wiz-h1"><span class="serif-i">All set.</span></h1>
+      <p class="wiz-lede">Your admin account is ready. Signing you in…</p>
+    </section>
+
+    <section class="wiz-pane" id="setup-form-pane">
+      <div class="wiz-eyebrow">Welcome</div>
+      <h1 class="wiz-h1"><span class="serif-i">Let's</span> set up<br/>your install.</h1>
+      <p class="wiz-lede">Looks like this is a fresh deploy. Pick an email and password for the admin account, tell us where your site lives, and we'll do the rest — schema, secrets, the lot.</p>
+
+      <form id="setup-form" method="post" action="#" autocomplete="on">
+        <div class="wiz-row">
+          <label class="wiz-field">
+            <span>Your site name</span>
+            <input id="setup-site-name" type="text" placeholder="My Site" required maxlength="80" />
+          </label>
+          <label class="wiz-field">
+            <span>Your site URL</span>
+            <input id="setup-site-url" type="url" placeholder="https://example.com" required autocomplete="url" />
+          </label>
+        </div>
+        <label class="wiz-field">
+          <span>Admin email</span>
+          <input id="setup-email" type="email" placeholder="you@example.com" required autocomplete="username" />
+        </label>
+        <label class="wiz-field wiz-field-big">
+          <span>Password <em>(8+ characters)</em></span>
+          <input id="setup-password" type="password" placeholder="" required minlength="8" maxlength="256" autocomplete="new-password" />
+        </label>
+        <div class="wiz-actions wiz-actions-single">
+          <button id="setup-go" class="btn btn-primary wiz-btn-lg" type="submit">Finish setup →</button>
+        </div>
+      </form>
+      <div id="setup-err" class="wiz-err"></div>
+      <p class="wiz-foot-note">This runs once. After it's done, you'll log in like any other admin and the onboarding wizard takes over.</p>
+    </section>
+  </div>
+</div>
+
+<div id="dash" class="dash" hidden>
+  <header class="topbar">
+    <div class="brand">pages-seo · admin</div>
+    <!-- Top-level tabs. 13 sections were tab-cluttering the bar; they're
+         now grouped under 7 parents. The parent's data-children attr
+         lists the child page IDs in order — admin.js's activateTab()
+         maps a parent click to its first child and renders the sub-nav
+         strip below. -->
+    <nav class="tabs">
+      <button class="tab" data-tab="overview" aria-current="page">Overview</button>
+      <button class="tab" data-tab="blog" data-children="blog,calendar">Blog</button>
+      <button class="tab" data-tab="brand" data-children="brand,prog,links">Brand</button>
+      <button class="tab" data-tab="covers">Covers</button>
+      <button class="tab" data-tab="seo" data-children="seo,embeds">Distribution</button>
+      <button class="tab" data-tab="status" data-children="status,updates,usage">
+        System
+        <span id="status-badge" class="tab-badge" hidden></span>
+        <span id="updates-badge" class="tab-badge" hidden></span>
+      </button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+    <!-- Sub-nav strip. Populated dynamically by admin.js when a tab
+         with data-children is active. Hidden otherwise. -->
+    <nav id="subtabs" class="subtabs" hidden></nav>
+    <div class="topbar-tools">
+      <!-- Version badge. Shows your installed version (short sha or
+           release tag). When upstream is ahead, an orange dot appears
+           and the button links to the Updates tab. Populated by
+           Updates.populateBadge() which calls seo.benjaminb.xyz's
+           /api/version, then compares against the installed sha
+           stored in settings. -->
+      <button id="version-badge" class="version-badge" type="button" hidden
+              title="Installed version" data-jump-to="updates">
+        <span class="version-dot" hidden></span>
+        <span class="version-label">…</span>
+      </button>
+      <button id="theme-toggle" class="btn btn-ghost btn-sm theme-toggle" type="button"
+              title="Toggle light/dark mode" aria-label="Toggle light/dark mode">
+        <!-- Icon swapped via CSS on [data-theme="light"] root. -->
+        <span class="theme-icon theme-icon-dark" aria-hidden="true">☾</span>
+        <span class="theme-icon theme-icon-light" aria-hidden="true">☀</span>
+      </button>
+      <button id="open-wizard" class="btn btn-ghost btn-sm" title="Re-run the onboarding wizard">Setup wizard</button>
+      <button id="lock" class="btn btn-ghost btn-sm">Sign out</button>
+    </div>
+  </header>
+
+  <main class="pages">
+
+    <!-- ============ OVERVIEW ============ -->
+    <section data-page="overview" class="page">
+      <div class="grid-3">
+        <div class="card">
+          <div class="card-eyebrow">Posts</div>
+          <div class="card-stat" id="stat-blog-count">—</div>
+          <div class="card-sub">Published blog posts</div>
+        </div>
+        <div class="card">
+          <div class="card-eyebrow">Programmatic</div>
+          <div class="card-stat" id="stat-prog-count">—</div>
+          <div class="card-sub">Generated landing pages</div>
+        </div>
+        <div class="card">
+          <div class="card-eyebrow">Queue</div>
+          <div class="card-stat" id="stat-queue-count">—</div>
+          <div class="card-sub">Pending keywords</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Quick actions</div>
+        <h2>Run something</h2>
+        <p>Trigger a one-off generation or refresh search engines now.</p>
+        <div class="row">
+          <button id="qa-blog" class="btn btn-primary">Generate blog post</button>
+          <button id="qa-prog" class="btn btn-primary">Generate next programmatic page</button>
+          <button id="qa-ping" class="btn btn-ghost">Ping IndexNow</button>
+        </div>
+        <pre id="qa-out" class="log" hidden></pre>
+      </div>
+    </section>
+
+    <!-- ============ BLOG ============ -->
+    <section data-page="blog" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">Daily blog</div>
+        <h2>Generate a post</h2>
+        <p>One full chain: pick topic → write 900-1300 words → generate hero image → publish + ping IndexNow. ~60-120s total.</p>
+        <div class="row">
+          <button id="blog-go" class="btn btn-primary">Generate now</button>
+          <span id="blog-status" class="status"></span>
+        </div>
+        <pre id="blog-log" class="log" hidden></pre>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Drafts &amp; failed</div>
+        <h2>Resume incomplete jobs</h2>
+        <p>Each step is idempotent, so retry resumes from whichever step failed.</p>
+        <div class="row">
+          <button id="jobs-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+        </div>
+        <table id="jobs-table" class="data">
+          <thead><tr><th>When</th><th>Topic</th><th>Slug</th><th>Status</th><th>Error</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Published posts</div>
+        <h2>Blog post list</h2>
+        <table id="posts-table" class="data">
+          <thead><tr><th>Date</th><th>Title</th><th>Slug</th><th>Provider</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ PROGRAMMATIC ============ -->
+    <section data-page="prog" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">Pull keywords</div>
+        <h2>Discover from Google Autocomplete</h2>
+        <p>Type a seed phrase, get 50 related long-tails, queued straight into the generation pipeline.</p>
+        <div class="row">
+          <input id="pull-seed" placeholder="e.g. instagram followers" />
+          <input id="pull-limit" type="number" value="50" min="1" max="200" style="max-width:90px" />
+          <button id="pull-go" class="btn btn-primary">Pull &amp; queue</button>
+          <button id="pull-preview" class="btn btn-ghost">Preview only</button>
+        </div>
+        <pre id="pull-out" class="log" hidden></pre>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Upload keyword list</div>
+        <h2>Paste your own</h2>
+        <p>One keyword per line. Duplicates are skipped automatically.</p>
+        <textarea id="upload-csv" placeholder="best smm panel uk&#10;cheap instagram followers&#10;…"></textarea>
+        <div class="row">
+          <button id="upload-go" class="btn btn-primary">Add to queue</button>
+          <span id="upload-status" class="status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Queue</div>
+        <h2>Pending keywords</h2>
+        <div class="row">
+          <select id="queue-status">
+            <option value="pending" selected>Pending</option>
+            <option value="processing">Processing</option>
+            <option value="done">Done</option>
+            <option value="failed">Failed</option>
+          </select>
+          <button id="queue-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+        </div>
+        <table id="queue-table" class="data data-queue">
+          <thead><tr>
+            <th>Keyword</th>
+            <th title="Intent classification: transactional > commercial > informational">Intent</th>
+            <th title="Heuristic 0-100 score. Higher = more likely to convert.">Score</th>
+            <th title="Cron picks highest priority first. Click ↑/↓ to adjust.">Priority</th>
+            <th>Status</th>
+            <th>Slug</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Run now</div>
+        <h2>Generate the next page</h2>
+        <p>Takes ~60-120s. Run multiple to chew through the queue manually; otherwise the daily cron handles 10/day.</p>
+        <div class="row">
+          <button id="prog-go" class="btn btn-primary">Generate next</button>
+          <span id="prog-status" class="status"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SEO ============ -->
+    <section data-page="seo" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">IndexNow</div>
+        <h2>Push the sitemap to Bing, Yandex, Seznam</h2>
+        <p>Reads <code>/sitemap.xml</code> and submits every URL to IndexNow. Runs automatically after each new post; this button is for ad-hoc re-pings.</p>
+        <div class="row">
+          <button id="ping-go" class="btn btn-primary">Ping IndexNow</button>
+          <span id="ping-status" class="status"></span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Sitemap</div>
+        <h2>Live sitemap</h2>
+        <p><a id="sitemap-link" href="/sitemap.xml" target="_blank">/sitemap.xml ↗</a></p>
+      </div>
+      <div class="card widget-card">
+        <div class="card-eyebrow">Embed widget</div>
+        <h2>Drop your blog on any site</h2>
+        <p class="muted">Paste one of these snippets anywhere — Webflow, Shopify, WordPress, a plain HTML page. The widget renders your most recent published posts inline. Cross-origin enabled.</p>
+
+        <div class="widget-tabs" role="tablist">
+          <button class="widget-tab is-active" type="button" data-flavour="js">JavaScript</button>
+          <button class="widget-tab" type="button" data-flavour="iframe">iframe</button>
+          <button class="widget-tab" type="button" data-flavour="link">Link only</button>
+        </div>
+
+        <div class="widget-snippet-wrap">
+          <pre id="widget-snippet" class="widget-snippet"></pre>
+          <button id="widget-copy" class="btn btn-sm widget-copy" type="button">Copy</button>
+        </div>
+
+        <details class="widget-options">
+          <summary>Customise</summary>
+          <div class="widget-options-grid">
+            <label>Container id
+              <input id="widget-opt-id" type="text" value="ps-blog" />
+            </label>
+            <label>Heading
+              <input id="widget-opt-title" type="text" placeholder="Latest from our blog" />
+            </label>
+            <label>Posts to show
+              <input id="widget-opt-count" type="number" min="1" max="50" value="5" />
+            </label>
+            <label>Theme
+              <select id="widget-opt-theme">
+                <option value="auto">Match site (auto)</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+          </div>
+        </details>
+
+        <div class="widget-preview" aria-label="Live preview of the widget">
+          <div class="widget-preview-bar">
+            <span class="widget-preview-dot"></span>
+            <span class="widget-preview-dot"></span>
+            <span class="widget-preview-dot"></span>
+            <span class="widget-preview-label">Preview</span>
+          </div>
+          <div id="widget-preview-host"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BRAND DNA ============ -->
+    <section data-page="brand" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">Step 1 · Scrape</div>
+        <h2>Generate brand DNA from your website</h2>
+        <p>Enter the URL of the site this content engine represents. We'll fetch the homepage, extract the meaningful content, and send it to your preferred AI provider to produce a structured brand profile. Always review the output before saving — the AI is fast, not infallible.</p>
+        <div class="row form-row">
+          <input id="brand-url" type="url" placeholder="https://example.com" />
+          <button id="brand-generate" class="btn btn-primary">Generate</button>
+          <span id="brand-gen-status" class="status"></span>
+        </div>
+        <p class="dim" style="margin-top:8px"><small>Tip: a homepage with rich body copy works best. JS-only / SPA homepages return little usable text — try a content-heavy page like <code>/about</code> or <code>/services</code> instead.</small></p>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Step 2 · Review &amp; edit</div>
+        <h2>Brand DNA</h2>
+        <p>Every field below is editable. Once you click Save, these flow into every blog post and programmatic page the toolkit generates.</p>
+        <div class="form-grid">
+          <label>
+            <span>Business type</span>
+            <textarea data-brand="business_type" rows="6" placeholder="What does the business do? Model? Differentiators? Who do they serve?"></textarea>
+            <small>4–8 sentences. The LLM uses this as the primary context for every post.</small>
+          </label>
+          <label>
+            <span>Brand voice &amp; tone</span>
+            <textarea data-brand="voice_tone" rows="4" placeholder="How should this brand sound on the page?"></textarea>
+            <small>2–4 sentences. Tone, register, what to emphasise.</small>
+          </label>
+          <label>
+            <span>Target audience</span>
+            <textarea data-brand="target_audience" rows="6" placeholder="Who's reading? Demographics, intent, jobs-to-be-done."></textarea>
+            <small>3–6 sentences. Primary + secondary segments.</small>
+          </label>
+          <label>
+            <span>Key themes</span>
+            <textarea data-brand="key_themes" rows="6" placeholder="One theme per line"></textarea>
+            <small>Topics the engine should cover. One per line.</small>
+          </label>
+        </div>
+        <div class="form-grid form-grid-cols">
+          <label>
+            <span>Service area <em class="optional">optional</em></span>
+            <input data-brand="service_area" type="text" placeholder="e.g. Edinburgh's New Town and West End" />
+            <small>If your business serves a specific area, add it here.</small>
+          </label>
+          <label>
+            <span>Topics to avoid <em class="optional">optional</em></span>
+            <textarea data-brand="topics_to_avoid" rows="3" placeholder="Competitor names, pricing details, services you don't offer"></textarea>
+            <small>The LLM will skip these entirely.</small>
+          </label>
+        </div>
+        <div class="form-grid form-grid-cols">
+          <label>
+            <span>Source URL <em class="optional">informational</em></span>
+            <input data-brand="source_url" type="text" readonly placeholder="(none yet)" />
+            <small>Where we scraped this from. Read-only.</small>
+          </label>
+          <label>
+            <span>Last generated</span>
+            <input id="brand-generated-at" type="text" readonly placeholder="(never)" />
+            <small>When this DNA was last refreshed.</small>
+          </label>
+        </div>
+        <div class="row">
+          <button id="brand-save" class="btn btn-primary">Save brand DNA</button>
+          <button id="brand-clear" class="btn btn-ghost">Clear all fields</button>
+          <span id="brand-save-status" class="status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Step 3 · Apply</div>
+        <h2>Filter the pending keyword queue against this brand</h2>
+        <p>Runs every pending keyword past the LLM with the brand context. Off-brand keywords get marked failed (not deleted) so you can review them in the Failed queue. Recommend dry-run first.</p>
+        <div class="row">
+          <button id="brand-filter-dry" class="btn">Dry run</button>
+          <button id="brand-filter-go" class="btn btn-primary">Run filter</button>
+          <span id="brand-filter-status" class="status"></span>
+        </div>
+        <div id="brand-filter-results" class="filter-results" hidden></div>
+      </div>
+    </section>
+
+    <!-- ============ LINKS ============ -->
+    <section data-page="links" class="page" hidden>
+      <div class="cal-head">
+        <div>
+          <h2 class="cal-title">Internal links</h2>
+          <p class="cal-sub">Named shortcuts the AI uses inside generated posts. Empty by default — add the routes that exist on your site, and import every existing page from the sitemap with one click.</p>
+        </div>
+        <div class="cal-actions">
+          <button id="link-sync" class="btn btn-ghost" title="Import every published post + landing page as a link the AI can use">Sync from sitemap</button>
+          <button id="link-add" class="btn btn-primary">+ Add link</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Curated links</div>
+        <p class="muted">Reserved names (<code>blog</code>, <code>home</code>, <code>rss</code>, <code>sitemap</code>) are always available. Add anything else the AI should reference — login pages, pricing, individual landing pages, anything.</p>
+        <div id="link-list-manual" class="link-list"><div class="muted">Loading…</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">From your sitemap</div>
+        <p class="muted">Auto-imported when you click "Sync". The AI sees these and may link to them where they fit the article naturally. Click sync after publishing new posts.</p>
+        <div id="link-list-sitemap" class="link-list link-list-compact"></div>
+      </div>
+    </section>
+
+    <!-- ============ CALENDAR ============ -->
+    <section data-page="calendar" class="page" hidden>
+      <div class="cal-head">
+        <div>
+          <h2 class="cal-title">Content Calendar</h2>
+          <p class="cal-sub" id="cal-sub">Auto-planned from your Brand DNA. Add, remove or swap anything you want.</p>
+        </div>
+        <div class="cal-actions">
+          <button id="cal-new" class="btn btn-ghost">+ New article</button>
+          <button id="cal-plan" class="btn btn-primary">Regenerate plan</button>
+        </div>
+      </div>
+
+      <div class="cal-shell">
+        <div class="cal-bar">
+          <h3 id="cal-range" class="cal-range">—</h3>
+          <div class="cal-nav">
+            <button id="cal-prev" class="cal-arrow" aria-label="Previous month">‹</button>
+            <button id="cal-today" class="cal-today">Today</button>
+            <button id="cal-next" class="cal-arrow" aria-label="Next month">›</button>
+          </div>
+        </div>
+
+        <div class="cal-week-head">
+          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div id="cal-grid" class="cal-grid">
+          <div class="cal-empty">Loading…</div>
+        </div>
+
+        <div class="cal-legend">
+          <span class="cal-leg cal-leg-scheduled">📅 Scheduled</span>
+          <span class="cal-leg cal-leg-generating">⟳ Generating</span>
+          <span class="cal-leg cal-leg-draft">📝 Draft</span>
+          <span class="cal-leg cal-leg-published">✓ Published</span>
+          <span class="cal-leg cal-leg-auto">✨ Auto-planned</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ USAGE ============ -->
+    <section data-page="usage" class="page" hidden>
+      <div class="card" id="usage-banner-card" hidden>
+        <div id="usage-banner" class="usage-banner"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">This month</div>
+        <h2>Budget &amp; spend</h2>
+        <div class="usage-summary">
+          <div class="usage-stat">
+            <div class="usage-stat-label">Spent</div>
+            <div class="usage-stat-value" id="usage-spent">—</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-label">Budget</div>
+            <div class="usage-stat-value" id="usage-budget">—</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-label">% used</div>
+            <div class="usage-stat-value" id="usage-pct">—</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-label">Calls</div>
+            <div class="usage-stat-value" id="usage-calls">—</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-label">Tokens</div>
+            <div class="usage-stat-value" id="usage-tokens">—</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-label">Errors</div>
+            <div class="usage-stat-value" id="usage-errors">—</div>
+          </div>
+        </div>
+        <div class="usage-progress" id="usage-progress-wrap">
+          <div class="usage-progress-bar"><div class="usage-progress-fill" id="usage-progress-fill"></div></div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <select id="usage-window">
+            <option value="month" selected>Current month</option>
+            <option value="7d">Last 7 days</option>
+            <option value="24h">Last 24 hours</option>
+          </select>
+          <button id="usage-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">By provider</div>
+        <h2>Spend per provider</h2>
+        <table class="data data-usage">
+          <thead><tr><th>Provider</th><th>Calls</th><th>Tokens</th><th>Cost (USD)</th></tr></thead>
+          <tbody id="usage-by-provider"><tr><td colspan="4" class="dim">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">By job kind</div>
+        <h2>Where the tokens went</h2>
+        <table class="data data-usage">
+          <thead><tr><th>Kind</th><th>Calls</th><th>Tokens</th><th>Cost (USD)</th></tr></thead>
+          <tbody id="usage-by-kind"><tr><td colspan="4" class="dim">Loading…</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Daily</div>
+        <h2>Cost per day</h2>
+        <div id="usage-daily" class="usage-daily">Loading…</div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Recent</div>
+        <h2>Last 25 calls</h2>
+        <table class="data data-usage data-recent">
+          <thead><tr><th>When</th><th>Provider</th><th>Kind</th><th>Source</th><th>Tokens</th><th>Cost</th><th>OK</th></tr></thead>
+          <tbody id="usage-recent"><tr><td colspan="7" class="dim">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ COVERS ============ -->
+    <section data-page="covers" class="page" hidden>
+      <div id="cover-frozen-banner" class="frozen-banner" hidden>
+        <div class="frozen-banner-inner">
+          <strong>Cover editor is read-only.</strong>
+          <p>This site is set to use <em>AI-generated images</em> as blog covers. To use the cover editor, switch the mode in <a href="#" data-jump-to="settings">Settings → Hero images</a>.</p>
+        </div>
+      </div>
+      <div id="cover-content">
+        <!-- The Canva-style cover editor mounts itself into #ce-mount.
+             All UI (toolbar, sidebars, canvas, inspector, floating
+             tools) is built by /cover-editor.js. -->
+        <div id="ce-mount"></div>
+      </div><!-- /#cover-content -->
+    </section>
+
+    <!-- ============ EMBEDS ============ -->
+    <section data-page="embeds" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">What this is</div>
+        <h2>Embed your blog anywhere</h2>
+        <p>Create a snippet to paste on any website. The widget renders this site's published blog posts inside a <code>&lt;div id="ps-blog"&gt;</code> container. Each embed gets its own unguessable id, so you can revoke one without affecting the others.</p>
+        <div class="form-grid form-grid-cols">
+          <label>
+            <span>Name (admin label)</span>
+            <input id="embed-create-name" type="text" placeholder="My main site sidebar" />
+          </label>
+          <label>
+            <span>Title shown above the widget</span>
+            <input id="embed-create-title" type="text" placeholder="Blog" />
+          </label>
+          <label>
+            <span>Accent colour</span>
+            <input id="embed-create-accent" type="color" value="#0a0a0a" />
+          </label>
+          <label>
+            <span>Max posts shown</span>
+            <input id="embed-create-limit" type="number" min="1" max="100" placeholder="30" />
+          </label>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button id="embed-create-go" class="btn btn-primary">Create embed</button>
+          <span id="embed-create-status" class="status"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Existing embeds</div>
+        <h2>Snippets</h2>
+        <p>Paste the snippet on any website. The widget auto-refreshes from this site every 5 minutes — new blog posts appear without anyone touching the host page.</p>
+        <div id="embed-list">
+          <div class="dim">Loading…</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ UPDATES ============ -->
+    <section data-page="updates" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">App version</div>
+        <div id="upd-summary" class="upd-summary">
+          <div class="muted">Checking for updates…</div>
+        </div>
+      </div>
+
+      <div class="card" id="upd-changes-card" hidden>
+        <div class="card-eyebrow">What's new</div>
+        <p class="muted" id="upd-changes-lede">—</p>
+        <div id="upd-diff-stats" class="upd-diff-stats" hidden></div>
+        <ul id="upd-commit-list" class="upd-commit-list"></ul>
+      </div>
+
+      <div class="card" id="upd-apply-card" hidden>
+        <div class="card-eyebrow">Apply update</div>
+        <p class="muted">Triggers Cloudflare Pages to rebuild your project from the latest upstream commit on your fork. <b>Sync your fork on GitHub first</b> (one click — open <a id="upd-sync-link" target="_blank" rel="noopener">your fork</a>, hit "Sync fork") so the build pulls today's code, not the snapshot from install day.</p>
+        <label class="form-row">
+          <span>Cloudflare API token <em class="optional">Pages:Edit scope. Not stored.</em></span>
+          <input id="upd-token" type="password" autocomplete="off" placeholder="Paste your CF API token" />
+        </label>
+        <p class="muted">Don't have one handy? <a id="upd-token-link" target="_blank" rel="noopener">Create a new token</a> — the link pre-fills the right permissions.</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+          <button id="upd-apply-go" class="btn btn-primary">Trigger rebuild</button>
+          <span id="upd-apply-status" class="status"></span>
+        </div>
+      </div>
+
+      <div class="card" id="upd-cli-card" hidden>
+        <div class="card-eyebrow">CLI install detected</div>
+        <p class="muted">In-app update is only available for installs done via the browser flow. You installed this site via the terminal, so updates run the same way:</p>
+        <pre class="log" style="margin:8px 0">curl -fsSL https://seo.benjaminb.xyz/install/run.sh | bash</pre>
+        <p class="muted">It detects an existing install with the same project slug and only re-deploys the code — your D1, R2, and admin user are preserved.</p>
+      </div>
+    </section>
+
+    <!-- ============ STATUS ============ -->
+    <section data-page="status" class="page" hidden>
+      <div class="card ai-help-card">
+        <div class="card-eyebrow">Stuck?</div>
+        <h2>Hand off to an AI</h2>
+        <p class="muted">
+          One click generates a self-contained prompt with <em>your</em> site
+          URLs and admin link baked in. Paste it into ChatGPT, Claude or
+          Gemini and it'll diagnose any issue end-to-end.
+        </p>
+        <div class="row form-row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+          <a id="ai-help-repair" class="btn btn-primary" href="https://seo.benjaminb.xyz/ai-setup?mode=repair" target="_blank" rel="noopener">
+            ✦ Get an AI to fix it
+          </a>
+          <a id="ai-help-update" class="btn" href="https://seo.benjaminb.xyz/ai-setup?mode=update" target="_blank" rel="noopener">
+            Update guide
+          </a>
+          <button id="ai-help-copy" class="btn" type="button">Copy prompt</button>
+          <span id="ai-help-status" class="muted" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Health</div>
+        <h2>System status</h2>
+        <p class="muted">
+          What's wired up correctly and what isn't. Run this any time you
+          suspect something is broken — it's a one-shot check against D1,
+          R2, Workers AI, the audit log, your spend cap, and the
+          self-repair secrets.
+          See <a href="https://seo.benjaminb.xyz/docs#errors" target="_blank">the docs</a> for what each error means.
+        </p>
+        <div class="row form-row" style="margin-top:8px">
+          <button id="status-refresh" class="btn btn-primary">Run checks</button>
+          <span id="status-summary" class="muted"></span>
+        </div>
+        <div id="status-checks" class="status-checks" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">AI providers</div>
+        <h2>Test each provider</h2>
+        <p class="muted">
+          Sends a 20-token "pong" prompt to every configured provider and reports the round-trip time
+          + a sample of the response. Workers AI is always there; other providers appear when you've
+          added a key in Settings.
+        </p>
+        <div class="row form-row">
+          <button id="providers-test" class="btn">Test all providers</button>
+        </div>
+        <ul id="providers-results" class="providers-results" style="margin-top:12px"></ul>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">Recent activity</div>
+        <h2>Audit log</h2>
+        <p class="muted">
+          Last 50 actions taken on this install — admin saves, cron runs, generation
+          failures, cover uploads. Use the filter to find specific kinds of events.
+        </p>
+        <div class="row form-row">
+          <select id="audit-filter" class="input">
+            <option value="">All actions</option>
+            <option value="fail">Only failures</option>
+            <option value="cover">Covers</option>
+            <option value="blog">Blog generation</option>
+            <option value="prog">Programmatic</option>
+            <option value="settings">Settings</option>
+            <option value="cover_template_export">Template exports</option>
+            <option value="cover_template_import">Template imports</option>
+          </select>
+          <button id="audit-refresh" class="btn">Refresh</button>
+        </div>
+        <table class="audit-table" style="margin-top:12px;width:100%;font-size:13px">
+          <thead><tr>
+            <th style="text-align:left">When</th>
+            <th style="text-align:left">Actor</th>
+            <th style="text-align:left">Action</th>
+            <th style="text-align:left">Details</th>
+          </tr></thead>
+          <tbody id="audit-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section data-page="settings" class="page" hidden>
+      <div class="card">
+        <div class="card-eyebrow">Brand voice</div>
+        <h2>Tone &amp; audience</h2>
+        <p>Layered on top of every LLM prompt. Tell the model who's writing and who's reading — output quality jumps immediately. Leave any field blank to use the built-in default.</p>
+        <div class="form-grid">
+          <label>
+            <span>Site CTA</span>
+            <input data-setting="site_cta" type="text" placeholder="Sign up to get started." />
+            <small>Injected into the closing paragraph of every post.</small>
+          </label>
+          <label>
+            <span>Voice / tone</span>
+            <textarea data-setting="site_tone" rows="2" placeholder="warm but authoritative interior-design voice, like a senior editor at Architectural Digest"></textarea>
+            <small>Free-form description. The more specific, the better.</small>
+          </label>
+          <label>
+            <span>Target reader</span>
+            <textarea data-setting="site_audience" rows="2" placeholder="someone planning a £20k+ bathroom renovation, comparing materials and brands"></textarea>
+            <small>What does the reader already know? What's their intent?</small>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Hero images</div>
+        <h2>How blog covers are produced</h2>
+        <p>Choose how the daily blog chain creates the hero image for each post.</p>
+        <div class="form-grid form-grid-cols">
+          <label class="mode-card">
+            <input type="radio" name="hero_image_mode" value="ai" data-setting="hero_image_mode" />
+            <div class="mode-card-body">
+              <strong>AI-generated images</strong>
+              <small>Workers AI (Flux) renders a fresh photo from the post's hero-image prompt. No setup required; free on the Workers AI tier. The Covers tab is shown but disabled.</small>
+            </div>
+          </label>
+          <label class="mode-card">
+            <input type="radio" name="hero_image_mode" value="cover" data-setting="hero_image_mode" />
+            <div class="mode-card-body">
+              <strong>Cover templates</strong>
+              <small>Use a saved template from the Covers tab. The post title is rendered into the template (via the <code>{title}</code> token). Requires at least one template marked default.</small>
+            </div>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Budget</div>
+        <h2>Monthly AI spend cap</h2>
+        <p>The cron Worker hard-stops once monthly spend reaches the limit. Manual admin generations keep working but you'll see a warning banner. Set to 0 to disable.</p>
+        <div class="form-grid form-grid-cols">
+          <label>
+            <span>Monthly budget (USD)</span>
+            <input data-setting="monthly_budget_usd" type="number" min="0" step="0.01" placeholder="10.00" />
+            <small>Tracks across all providers. Resets at the start of each calendar month (UTC).</small>
+          </label>
+          <label>
+            <span>Warn at %</span>
+            <input data-setting="budget_warn_pct" type="number" min="0" max="100" placeholder="80" />
+            <small>Show a banner once spend reaches this percentage of the budget.</small>
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Pricing</div>
+        <h2>LLM rate catalogue</h2>
+        <p>Token costs are pulled from <a href="https://models.dev" target="_blank" rel="noopener">models.dev</a>, a community-maintained catalogue of LLM prices. Falls back to a bundled snapshot if the network call fails.</p>
+        <div class="row">
+          <button id="pricing-refresh" class="btn">Refresh from models.dev</button>
+          <span id="pricing-status" class="status"></span>
+        </div>
+        <div id="pricing-current" class="pricing-current dim">Loading current rates…</div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Length</div>
+        <h2>Post length targets</h2>
+        <p>Hints to the model. Workers AI tends to undershoot; cloud models hit these reliably.</p>
+        <div class="form-grid form-grid-cols">
+          <label>
+            <span>Blog post min words</span>
+            <input data-setting="article_min_words" type="number" min="100" max="5000" placeholder="900" />
+          </label>
+          <label>
+            <span>Blog post max words</span>
+            <input data-setting="article_max_words" type="number" min="100" max="5000" placeholder="1300" />
+          </label>
+          <label>
+            <span>Programmatic min words</span>
+            <input data-setting="prog_min_words" type="number" min="100" max="5000" placeholder="700" />
+          </label>
+          <label>
+            <span>Programmatic max words</span>
+            <input data-setting="prog_max_words" type="number" min="100" max="5000" placeholder="1000" />
+          </label>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Provider</div>
+        <h2>Preferred AI provider</h2>
+        <p>The toolkit tries this provider first for every job. If it fails, the rest of the configured providers are tried in registry order. Leave blank to use the default (Workers AI).</p>
+        <label>
+          <span>Default provider</span>
+          <select data-setting="default_ai_provider">
+            <option value="">(use registry order)</option>
+          </select>
+        </label>
+      </div>
+      <div class="card">
+        <div class="card-eyebrow">Search engines</div>
+        <h2>Auto-index new posts on Google + Bing</h2>
+        <p class="muted">
+          IndexNow (Bing, Yandex, Seznam) pings automatically on every publish — no setup needed.
+          For Google, paste a Search Console service-account JSON below and we'll re-submit your
+          sitemap on every publish. Optional: enable the Indexing API for faster pickup.
+        </p>
+
+        <details class="gsc-howto">
+          <summary>How to get a service-account JSON (3 minutes)</summary>
+          <ol class="gsc-steps">
+            <li>Open <a href="https://console.cloud.google.com/projectcreate" target="_blank" rel="noopener">Google Cloud → Create project</a>. Name it anything (e.g. "pages-seo-indexing").</li>
+            <li>In that project, open <a href="https://console.cloud.google.com/apis/library/searchconsole.googleapis.com" target="_blank" rel="noopener">Search Console API</a> and click <b>Enable</b>. Also enable the <a href="https://console.cloud.google.com/apis/library/indexing.googleapis.com" target="_blank" rel="noopener">Indexing API</a> if you want per-URL pings.</li>
+            <li>Go to <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" rel="noopener">Service accounts → Create service account</a>. Skip the role + user steps.</li>
+            <li>Click the account → <b>Keys</b> tab → <b>Add Key → JSON</b>. Save the file.</li>
+            <li>In <a href="https://search.google.com/search-console/users" target="_blank" rel="noopener">Search Console → Users and permissions</a>, click <b>Add user</b>. Paste the service account email (it ends in <code>iam.gserviceaccount.com</code>). Set permission to <b>Owner</b>.</li>
+            <li>Open the JSON file in a text editor, copy the entire contents, paste below.</li>
+          </ol>
+        </details>
+
+        <label class="settings-field" style="margin-top:14px">
+          <span>Service-account JSON</span>
+          <textarea id="gsc-sa-json" rows="6" placeholder='{"type":"service_account","project_id":"...","client_email":"...iam.gserviceaccount.com","private_key":"-----BEGIN PRIVATE KEY-----\n..."}'></textarea>
+          <small id="gsc-sa-status" class="dim">Not configured.</small>
+        </label>
+
+        <label class="settings-field">
+          <span>Property identifier <em>(optional — auto-derived from site URL)</em></span>
+          <input id="gsc-property" type="text" placeholder="https://example.com/ — or — sc-domain:example.com" />
+          <small class="dim">
+            URL-prefix property → <code>https://example.com/</code> (with trailing slash).
+            Domain property → <code>sc-domain:example.com</code> (no http).
+          </small>
+        </label>
+
+        <label class="settings-field settings-field-check">
+          <input id="gsc-use-indexing-api" type="checkbox" />
+          <span>
+            Also use the Indexing API (faster crawl, but technically against Google's ToS for non-job-posting content).
+          </span>
+        </label>
+
+        <div class="row form-row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+          <button id="gsc-save" class="btn btn-primary" type="button">Save Google credentials</button>
+          <button id="gsc-test" class="btn" type="button">Test connection</button>
+          <button id="gsc-clear" class="btn btn-ghost btn-sm" type="button">Clear</button>
+          <span id="gsc-status" class="status" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-eyebrow">AI provider keys</div>
+        <h2>API key status</h2>
+        <p>Paste a key below to store it encrypted in the database (AES-GCM, keyed off your admin token). Or, for the strongest guarantee, run the CLI command and store it as a Pages secret instead — those win over vault values.</p>
+        <div id="providers-grid" class="providers-grid">
+          <div class="dim">Loading…</div>
+        </div>
+        <p class="dim" style="margin-top:14px"><small><strong>How keys are resolved:</strong> Pages secrets first, then vault. <strong>Vault risk:</strong> anyone with your admin token + database access can decrypt. Rotate the token via <code>wrangler pages secret put ADMIN_TOKEN</code> if it leaks (vault keys will then need to be re-saved here).</small></p>
+      </div>
+      <div class="card">
+        <div class="row">
+          <button id="settings-save" class="btn btn-primary">Save settings</button>
+          <span id="settings-status" class="status"></span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Onboarding wizard. Hidden until admin.js decides whether to show
+     it (first login with no Brand DNA → auto-open). The "Help → Run
+     onboarding again" entry can re-open it for repeat passes. -->
+<div id="wiz" class="wiz" hidden>
+  <div class="wiz-shell">
+
+    <header class="wiz-head">
+      <div class="wiz-brand-mark">
+        <span class="wiz-dot"></span>
+        <span class="wiz-brand-text">pages-seo</span>
+      </div>
+      <ol class="wiz-steps" aria-label="Onboarding progress">
+        <li class="wiz-step" data-step="1"><b>Hello</b></li>
+        <li class="wiz-step" data-step="2"><b>Brand</b></li>
+        <li class="wiz-step" data-step="3"><b>Providers</b></li>
+        <li class="wiz-step" data-step="4"><b>Calendar</b></li>
+      </ol>
+      <button id="wiz-skip" class="wiz-skip" type="button" title="Skip onboarding">Skip</button>
+    </header>
+
+    <!-- PANE 0: Welcome -->
+    <section class="wiz-pane wiz-pane-center" data-pane="0">
+      <div class="wiz-eyebrow">Welcome</div>
+      <h1 class="wiz-h1"><span class="serif-i">Let's get</span> your blog<br/>on autopilot.</h1>
+      <p class="wiz-lede">In four short steps we'll learn about your brand, plug in any AI keys you want to use, and draft your first month of articles. You can change anything later.</p>
+      <ul class="wiz-bullets">
+        <li><span>1</span> Tell us about your site</li>
+        <li><span>2</span> Review your brand DNA</li>
+        <li><span>3</span> Pick AI providers <em>(optional)</em></li>
+        <li><span>4</span> Approve your 28-day plan</li>
+      </ul>
+      <div class="wiz-actions wiz-actions-single">
+        <button id="wiz-start" class="btn btn-primary wiz-btn-lg" type="button">Let's go →</button>
+      </div>
+      <p class="wiz-foot-note">Takes about two minutes. Workers AI runs everything for free out of the box.</p>
+    </section>
+
+    <!-- PANE 1: Brand URL -->
+    <section class="wiz-pane" data-pane="1" hidden>
+      <div class="wiz-eyebrow">Step 1 of 4</div>
+      <h1 class="wiz-h1"><span class="serif-i">Where</span> does your brand live?</h1>
+      <p class="wiz-lede">Paste your homepage URL and we'll read it to draft a Brand DNA — voice, audience, themes, the lot. Takes ~30 seconds.</p>
+      <label class="wiz-field wiz-field-big">
+        <span>Your website</span>
+        <input id="wiz-url" type="url" placeholder="https://example.com" autocomplete="url" inputmode="url" />
+      </label>
+      <details class="wiz-details">
+        <summary>Advanced options</summary>
+        <div class="wiz-row">
+          <label class="wiz-field">
+            <span>Service area <em>(optional)</em></span>
+            <input id="wiz-service-area" type="text" placeholder="e.g. London or UK-wide" />
+          </label>
+          <label class="wiz-field">
+            <span>Topics to avoid <em>(optional)</em></span>
+            <input id="wiz-avoid" type="text" placeholder="e.g. competitor names" />
+          </label>
+        </div>
+      </details>
+      <div class="wiz-actions">
+        <button class="btn btn-ghost" type="button" data-wiz-back="0">← Back</button>
+        <button id="wiz-go-2" class="btn btn-primary" type="button">Read my site →</button>
+      </div>
+      <div id="wiz-1-err" class="wiz-err"></div>
+    </section>
+
+    <!-- PANE 2: Brand DNA review -->
+    <section class="wiz-pane" data-pane="2" hidden>
+      <div class="wiz-eyebrow">Step 2 of 4</div>
+      <h1 class="wiz-h1"><span class="serif-i">Here's</span> how we read your brand.</h1>
+      <p class="wiz-lede">A quick scan. Tweak anything that's wrong — these fields flow into every prompt the toolkit ever sends.</p>
+      <div id="wiz-brand-loading" class="wiz-loading-big" hidden>
+        <div class="wiz-spinner"></div>
+        <div>
+          <b>Reading <span id="wiz-loading-url"></span>…</b>
+          <p>Scraping the homepage and asking the model to summarise your brand voice. Hang on for ~20 seconds.</p>
+        </div>
+      </div>
+      <div id="wiz-brand-fields" class="wiz-brand-fields" hidden>
+        <label class="wiz-field"><span>What you do</span><textarea id="wiz-b-business" rows="4" maxlength="2400"></textarea></label>
+        <label class="wiz-field"><span>Voice / tone</span><textarea id="wiz-b-voice" rows="3" maxlength="1200"></textarea></label>
+        <label class="wiz-field"><span>Target audience</span><textarea id="wiz-b-audience" rows="3" maxlength="2000"></textarea></label>
+        <label class="wiz-field"><span>Key themes <em>(one per line)</em></span><textarea id="wiz-b-themes" rows="4" maxlength="1200"></textarea></label>
+        <div class="wiz-row">
+          <label class="wiz-field"><span>Service area</span><input id="wiz-b-area" type="text" maxlength="400" /></label>
+          <label class="wiz-field"><span>Topics to avoid</span><input id="wiz-b-avoid" type="text" maxlength="600" /></label>
+        </div>
+      </div>
+      <div class="wiz-actions">
+        <button class="btn btn-ghost" type="button" data-wiz-back="1">← Back</button>
+        <button id="wiz-go-3" class="btn btn-primary" type="button" disabled>Save & continue →</button>
+      </div>
+      <div id="wiz-2-err" class="wiz-err"></div>
+    </section>
+
+    <!-- BEAT 2: brand confirmed -->
+    <section class="wiz-pane wiz-pane-center wiz-beat" data-pane="beat-brand" hidden>
+      <div class="wiz-tick">✓</div>
+      <h1 class="wiz-h1"><span class="serif-i">Brand</span> locked in.</h1>
+      <p class="wiz-lede">Every post we write from here will sound like <span id="wiz-beat-host" class="wiz-pill">your site</span>. You can re-edit any field from the Brand DNA tab later.</p>
+      <div class="wiz-actions wiz-actions-single">
+        <button class="btn btn-primary wiz-btn-lg" type="button" data-wiz-next="3">Next: AI providers →</button>
+      </div>
+    </section>
+
+    <!-- PANE 3: Providers -->
+    <section class="wiz-pane" data-pane="3" hidden>
+      <div class="wiz-eyebrow">Step 3 of 4</div>
+      <h1 class="wiz-h1"><span class="serif-i">Pick</span> your AI engines.</h1>
+      <p class="wiz-lede">Workers AI is built in and free up to the daily limit. Drop in keys for any cloud providers you want as fallbacks — or skip and add them later.</p>
+      <div id="wiz-providers" class="wiz-provs"></div>
+      <div class="wiz-actions">
+        <button class="btn btn-ghost" type="button" data-wiz-back="2">← Back</button>
+        <button id="wiz-go-4" class="btn btn-primary" type="button">Continue →</button>
+      </div>
+      <div id="wiz-3-err" class="wiz-err"></div>
+    </section>
+
+    <!-- PANE 4: Plan -->
+    <section class="wiz-pane" data-pane="4" hidden>
+      <div class="wiz-eyebrow">Step 4 of 4</div>
+      <h1 class="wiz-h1"><span class="serif-i">Your first</span> month, planned.</h1>
+      <p class="wiz-lede">We've drafted 28 article ideas from your brand DNA. Have a glance — you can swap, remove, or reorder any of them from the Calendar tab.</p>
+      <div id="wiz-plan-loading" class="wiz-loading-big">
+        <div class="wiz-spinner"></div>
+        <div>
+          <b>Drafting your calendar…</b>
+          <p>One idea per day for the next four weeks. About 20 seconds.</p>
+        </div>
+      </div>
+      <ol id="wiz-plan-list" class="wiz-plan-list" hidden></ol>
+      <div class="wiz-actions">
+        <button class="btn btn-ghost" type="button" data-wiz-back="3">← Back</button>
+        <button id="wiz-go-done" class="btn btn-primary" type="button" disabled>Looks good →</button>
+      </div>
+      <div id="wiz-4-err" class="wiz-err"></div>
+    </section>
+
+    <!-- BEAT done: all set -->
+    <section class="wiz-pane wiz-pane-center wiz-beat" data-pane="beat-done" hidden>
+      <div class="wiz-tick wiz-tick-big">✦</div>
+      <h1 class="wiz-h1"><span class="serif-i">You're</span> live.</h1>
+      <p class="wiz-lede">Tomorrow at 08:00 UTC the first post will publish itself — image, SEO metadata, IndexNow ping, the lot. You can also hit "Run now" from the dashboard to publish right away.</p>
+      <ul class="wiz-bullets wiz-bullets-inline">
+        <li><b>Calendar</b> – browse and edit the next 28 days</li>
+        <li><b>Daily blog</b> – kick off a post manually</li>
+        <li><b>Links</b> – teach the AI about your /login, /pricing, etc.</li>
+      </ul>
+      <div class="wiz-actions wiz-actions-single">
+        <button id="wiz-done" class="btn btn-primary wiz-btn-lg" type="button">Open my dashboard →</button>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- Link editor modal -->
+<div id="link-modal" class="cal-modal-backdrop" hidden>
+  <div class="cal-modal">
+    <h3 id="link-modal-title">Add link</h3>
+    <label>Name <em class="muted">(the AI will use this in <code>[text](name)</code>)</em>
+      <input id="link-mod-name" type="text" placeholder="e.g. login" maxlength="40" autocomplete="off" />
+    </label>
+    <label>URL <em class="muted">(root-relative <code>/path</code> or absolute <code>https://…</code>)</em>
+      <input id="link-mod-url" type="text" placeholder="/login" autocomplete="off" />
+    </label>
+    <label>Description <em class="muted">(optional — helps the AI know when to use it)</em>
+      <textarea id="link-mod-desc" maxlength="300" placeholder="e.g. user sign-in page"></textarea>
+    </label>
+    <div class="cal-modal-actions">
+      <div class="left">
+        <button id="link-mod-delete" class="btn btn-ghost danger" hidden>Delete</button>
+      </div>
+      <div class="right">
+        <button id="link-mod-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="link-mod-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+    <div id="link-mod-err" class="status bad" style="min-height:18px"></div>
+  </div>
+</div>
+
+<!-- Slot editor modal (calendar) -->
+<div id="cal-modal" class="cal-modal-backdrop" hidden>
+  <div class="cal-modal">
+    <h3 id="cal-modal-title">New article</h3>
+    <label>Title<input id="cal-mod-title" type="text" placeholder="How to do X for Y" maxlength="200" /></label>
+    <label>Date<input id="cal-mod-date" type="date" /></label>
+    <label>Primary keyword<input id="cal-mod-keyword" type="text" placeholder="optional — for SEO targeting" maxlength="120" /></label>
+    <label>Angle / brief<textarea id="cal-mod-angle" placeholder="optional — 1–2 sentences to steer the writer" maxlength="500"></textarea></label>
+    <div class="cal-modal-actions">
+      <div class="left">
+        <button id="cal-mod-delete" class="btn btn-ghost danger" hidden>Delete</button>
+      </div>
+      <div class="right">
+        <button id="cal-mod-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="cal-mod-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/cover-editor.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>
